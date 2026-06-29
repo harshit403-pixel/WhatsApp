@@ -22,6 +22,7 @@
   "homepage": "https://github.com/harshit403-pixel/WhatsApp#readme",
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "express-validator": "^7.3.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
