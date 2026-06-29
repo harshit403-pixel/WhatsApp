@@ -9,3 +9,17 @@ export const createUser = async({username, password, email})=>{
     return user
 
 }
+
+
+export const getUserByEmailOrUsername = async({username,email})=>{
+
+    const user = await userModel.findOne({
+        $or:[
+            {email},
+            {username}
+        ]
+    })
+
+    return user
+
+}
