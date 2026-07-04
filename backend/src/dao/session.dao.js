@@ -30,3 +30,27 @@ export const getSessionByUserId = async (userId) => {
 
   return session;
 };
+
+
+/**
+ * update session by usedID
+ * @param {string} userId - ID of the user
+ * @param {string} refreshToken - new refresh token
+ * @returns {Promise<Document|null>} Updated session document or null if not found
+*/
+
+export const updateSessionbyUserId = async (userId, refreshToken)=>{
+  const session = await sessionModel.findOneAndUpdate(
+    {userId},
+    {refreshToken},
+    {new:true}
+  )
+  return session
+}
+
+
+export const deleteSessionByUserId = async (req,res) => {
+  const session = await sessionModel.findOneAndDelete({userId})
+  return session
+  
+}

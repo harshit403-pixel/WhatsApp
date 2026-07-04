@@ -23,3 +23,11 @@ export const getUserByEmailOrUsername = async({username,email})=>{
     return user
 
 }
+
+
+
+export const getUserById = async (userId) => {
+    const user = await userModel.findById(userId)
+
+    return user
+}
