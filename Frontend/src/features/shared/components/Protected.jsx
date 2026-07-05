@@ -1,5 +1,6 @@
 import { Navigate } from "react-router";
 import { useSelector } from "react-redux";
+import AppShellLoader from "./AppShellLoader";
 
 const Protected = ({ children }) => {
   const { user, isAuthChecked } = useSelector(
@@ -7,7 +8,7 @@ const Protected = ({ children }) => {
   );
 
   if (!isAuthChecked) {
-    return <div>Loading...</div>;
+    return <AppShellLoader />;
   }
 
   if (!user) {

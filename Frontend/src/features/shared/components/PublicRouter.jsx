@@ -1,6 +1,6 @@
-import React from "react";
 import { Navigate } from "react-router";
 import { useSelector } from "react-redux";
+import AppShellLoader from "./AppShellLoader";
 
 const PublicRouter = ({ children }) => {
   const { user, isAuthChecked } = useSelector(
@@ -9,7 +9,12 @@ const PublicRouter = ({ children }) => {
 
   // Wait until authentication check completes
   if (!isAuthChecked) {
-    return <div>Loading...</div>;
+    return (
+      <AppShellLoader
+        title="Opening authentication"
+        description="Checking whether we should keep you signed in or return you to your workspace."
+      />
+    );
   }
 
   // User is already logged in

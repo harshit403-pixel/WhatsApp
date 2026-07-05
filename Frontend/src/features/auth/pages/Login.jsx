@@ -1,89 +1,206 @@
-import React from "react";
-import { useNavigate, Link } from "react-router";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router";
+import { Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
+import { motion } from "framer-motion";
+import { useSelector } from "react-redux";
+
 import useAuth from "../hooks/useAuth";
+import AuthShell from "../components/AuthShell";
+import { Button } from "../../shared/components/ui/Button";
+import Input from "../../shared/components/ui/Input";
+import Spinner from "../../shared/components/ui/Spinner";
+import { appToast } from "../../shared/lib/toast";
 
 const Login = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const { loading } = useSelector((state) => state.auth);
+
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+  const [fields, setFields] = useState({
+    email: "",
+    password: "",
+  });
+  const [errors, setErrors] = useState({});
+
+  const validate = () => {
+    const nextErrors = {};
+
+    if (!fields.email.trim()) {
+      nextErrors.email = "Email is required.";
+    } else if (!/\S+@\S+\.\S+/.test(fields.email)) {
+      nextErrors.email = "Please provide a valid email address.";
+    }
+
+    if (!fields.password.trim()) {
+      nextErrors.password = "Password is required.";
+    }
+
+    setErrors(nextErrors);
+
+    return Object.keys(nextErrors).length === 0;
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
 
-    const email = e.target.email.value;
-    const password = e.target.password.value;
+    if (!validate()) {
+      appToast.error(
+        "We need a few details first",
+        "Check the highlighted fields and try again."
+      );
+      return;
+    }
 
     try {
-      await login({ email, password });
+      await login({
+        email: fields.email.trim(),
+        password: fields.password,
+      });
 
-      // Redirect after successful login
+      appToast.success(
+        "Welcome back",
+        rememberMe
+          ? "Your secure session is ready on this device."
+          : "You're signed in and ready to jump back in."
+      );
       navigate("/");
     } catch (error) {
-      console.error(error);
-      alert(
-        error.response?.data?.message || "Login failed"
+      appToast.error(
+        error.response?.data?.message || "Login failed",
+        "Double-check your credentials and try again."
       );
     }
   };
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
-        <h1 className="text-3xl font-bold text-center mb-8">
-          Login
-        </h1>
+    <AuthShell
+      eyebrow="Return to chat"
+      title="Step back into your workspace."
+      description="Sign in with your existing account to access the redesigned desktop messaging experience."
+      footerPrompt="Need an account?"
+      footerLabel="Create one"
+      footerHref="/register"
+    >
+      <motion.form
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.24, delay: 0.08 }}
+        onSubmit={handleLogin}
+        className="glass-panel w-full max-w-xl space-y-6 rounded-[2rem] p-6 sm:p-7"
+      >
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold text-white">
+            Welcome back
+          </h2>
+          <p className="text-sm text-zinc-400">
+            Use your existing credentials. Session cookies remain secure on the
+            backend.
+          </p>
+        </div>
 
-        <form
-          onSubmit={handleLogin}
-          className="flex flex-col gap-5"
+        <div className="grid gap-4">
+          <Input
+            label="Email"
+            type="email"
+            name="email"
+            autoComplete="email"
+            value={fields.email}
+            onChange={(event) =>
+              setFields((current) => ({
+                ...current,
+                email: event.target.value,
+              }))
+            }
+            icon={<Mail className="h-4 w-4" />}
+            error={errors.email}
+            placeholder="name@company.com"
+          />
+
+          <Input
+            label="Password"
+            type={showPassword ? "text" : "password"}
+            name="password"
+            autoComplete="current-password"
+            value={fields.password}
+            onChange={(event) =>
+              setFields((current) => ({
+                ...current,
+                password: event.target.value,
+              }))
+            }
+            icon={<LockKeyhole className="h-4 w-4" />}
+            error={errors.password}
+            placeholder="Enter your password"
+            rightSlot={
+              <button
+                type="button"
+                aria-label={
+                  showPassword
+                    ? "Hide password"
+                    : "Show password"
+                }
+                onClick={() =>
+                  setShowPassword((current) => !current)
+                }
+                className="text-zinc-500 transition hover:text-white"
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            }
+          />
+        </div>
+
+        <div className="flex flex-col gap-3 text-sm text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
+          <label className="inline-flex items-center gap-3 text-zinc-300">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(event) =>
+                setRememberMe(event.target.checked)
+              }
+              className="h-4 w-4 rounded border-white/12 bg-white/5 text-emerald-400 accent-emerald-400"
+            />
+            <span>Remember me on this device</span>
+          </label>
+
+          <span className="text-xs text-zinc-500">
+            Secure cookie sessions stay enabled either way.
+          </span>
+        </div>
+
+        <Button
+          type="submit"
+          size="lg"
+          className="w-full"
+          disabled={loading}
         >
-          {/* Email */}
-          <div>
-            <label className="block mb-2 font-medium">
-              Email
-            </label>
-            <input
-              type="email"
-              name="email"
-              placeholder="Enter your email"
-              required
-              className="w-full border rounded-lg px-4 py-3 outline-none focus:border-blue-500"
-            />
-          </div>
+          {loading ? (
+            <>
+              <Spinner size="sm" className="text-black" />
+              <span>Signing you in</span>
+            </>
+          ) : (
+            "Enter workspace"
+          )}
+        </Button>
 
-          {/* Password */}
-          <div>
-            <label className="block mb-2 font-medium">
-              Password
-            </label>
-            <input
-              type="password"
-              name="password"
-              placeholder="Enter your password"
-              required
-              className="w-full border rounded-lg px-4 py-3 outline-none focus:border-blue-500"
-            />
-          </div>
-
-          {/* Submit Button */}
-          <button
-            type="submit"
-            className="bg-black text-white py-3 rounded-lg hover:opacity-90 transition"
-          >
-            Login
-          </button>
-        </form>
-
-        <p className="text-center mt-6">
-          Don't have an account?{" "}
+        <p className="text-center text-sm text-zinc-500">
+          Prefer a fresh start?{" "}
           <Link
             to="/register"
-            className="text-blue-600 hover:underline"
+            className="font-medium text-emerald-300 transition hover:text-emerald-200"
           >
-            Register
+            Register instead
           </Link>
         </p>
-      </div>
-    </main>
+      </motion.form>
+    </AuthShell>
   );
 };
 
