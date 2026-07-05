@@ -2,10 +2,7 @@ import { io } from "socket.io-client";
 
 let chatSocket = null;
 
-/**
- * Socket lifecycle stays centralized here so the rest of the app can focus on
- * chat behavior instead of connection bookkeeping.
- */
+// Establishes a connection to the chat server using Socket.IO. If a connection already exists, it reuses that connection. The function takes an authentication token as an argument, which is used to authenticate the user with the server.
 export const connectChatSocket = (token) => {
   if (!token) {
     return null;

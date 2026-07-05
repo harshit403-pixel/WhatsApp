@@ -15,6 +15,8 @@ import {
   disconnectChatSocket,
 } from "../services/socket.client";
 
+
+// ChatProvider component that manages the chat socket connection and handles incoming events. It connects to the chat socket when the user is authenticated and disconnects when the user logs out or the authentication state changes. It also listens for various socket events, such as new messages, typing indicators, and presence updates, and dispatches corresponding actions to update the Redux store.
 const ChatProvider = ({ children }) => {
   const dispatch = useDispatch();
   const { user, accessToken, isAuthChecked } =

@@ -29,6 +29,7 @@ import {
 } from "../state/chat.slice";
 import { appToast } from "../../shared/lib/toast";
 
+// Helper function to create a temporary message object for optimistic UI updates when sending messages. 
 const createTemporaryMessage = ({
   content,
   conversationId,
@@ -58,6 +59,7 @@ const createTemporaryMessage = ({
   };
 };
 
+// Custom React hook for managing chat-related state and actions, including loading conversations, sending messages, and handling typing indicators.
 const useChat = () => {
   const dispatch = useDispatch();
   const currentUser = useSelector(
