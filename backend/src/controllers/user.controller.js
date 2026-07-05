@@ -3,7 +3,17 @@ import * as userDao from '../dao/user.dao.js'
 export const searchUserByUsername = async (req, res) => {
     const { query } = req.query;
    try {
-    const users = await userDao.searchUsersByUsername(query);
+    if(!query?.trim()){
+        return res.status(200).json({
+            message: "Users fetched successfully",
+            data: []
+        })
+    }
+
+    const users = await userDao.searchUsersByUsername(
+        query,
+        req.userId
+    );
     res.status(200).json({
         message: "Users fetched successfully",
         data: users
