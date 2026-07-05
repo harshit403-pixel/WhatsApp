@@ -70,7 +70,18 @@ export const loginUser = async(req, res)=>{
     const accessToken = authUtils.generateAccessToken(user._id)
     const refreshToken = authUtils.generateRefreshToken(user._id)
 
-    await sessionDao.updateSessionbyUserId(user._id,refreshToken)
+    const session =
+      await sessionDao.updateSessionbyUserId(
+        user._id,
+        refreshToken
+      )
+
+    if(!session){
+        await sessionDao.createSession({
+            userId:user._id,
+            refreshToken
+        })
+    }
 
     res.cookie('refreshToken', refreshToken,{
         httpOnly:true,
@@ -105,7 +116,7 @@ export const logoutUser = async(req,res)=>{
     }
     
     try {
-        const decoded = authUtils.generateRefreshToken(refreshToken)
+        const decoded = authUtils.verifyRefreshToken(refreshToken)
 
         await sessionDao.deleteSessionByUserId(decoded.userId)
 
@@ -113,6 +124,10 @@ export const logoutUser = async(req,res)=>{
             httpOnly:true,
             secure: env.NODE_ENV === 'production',
             sameSite: 'strict'
+        })
+
+        return res.status(200).json({
+            message:"user logged out successfully"
         })
 
     } catch (error) {
