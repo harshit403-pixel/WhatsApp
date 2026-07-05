@@ -7,6 +7,8 @@ const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     fetchMe();
+    // We only want to restore the session once when the app boots.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return children;

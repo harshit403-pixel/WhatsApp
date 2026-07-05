@@ -1,8 +1,14 @@
-import { Check, CheckCheck, Sparkles } from "lucide-react";
+import {
+  Check,
+  CheckCheck,
+  LoaderCircle,
+  Sparkles,
+} from "lucide-react";
 
 import { cn } from "../lib/cn";
 
 const deliveryIcons = {
+  sending: LoaderCircle,
   sent: Check,
   delivered: CheckCheck,
   read: CheckCheck,
@@ -13,6 +19,8 @@ const MessageBubble = ({
   timestamp,
   variant = "incoming",
   deliveryState,
+  senderName,
+  clientState,
 }) => {
   const DeliveryIcon = deliveryIcons[deliveryState];
 
@@ -43,14 +51,26 @@ const MessageBubble = ({
         ) : null}
 
         <div className="space-y-2">
+          {senderName ? (
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-300">
+              {senderName}
+            </p>
+          ) : null}
           <p className="text-sm leading-6">{text}</p>
           {timestamp ? (
             <div className="flex items-center gap-1 text-[11px] text-zinc-500">
               <span>{timestamp}</span>
+              {clientState === "failed" ? (
+                <span className="text-red-300">
+                  Failed
+                </span>
+              ) : null}
               {DeliveryIcon ? (
                 <DeliveryIcon
                   className={cn(
                     "h-3.5 w-3.5",
+                    deliveryState === "sending" &&
+                      "animate-spin",
                     deliveryState === "read"
                       ? "text-emerald-300"
                       : "text-zinc-500"

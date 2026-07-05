@@ -18,6 +18,12 @@ const CreateGroupModal = ({
   open,
   onClose,
   currentUserId,
+  mode = "create",
+  title,
+  description,
+  confirmLabel,
+  hideGroupName = false,
+  excludedUserIds = [],
   onSubmit,
 }) => {
   const [groupName, setGroupName] = useState("");
@@ -58,7 +64,10 @@ const CreateGroupModal = ({
         setResults(
           users.filter(
             (entry) =>
-              resolveUserId(entry) !== currentUserId
+              resolveUserId(entry) !== currentUserId &&
+              !excludedUserIds.includes(
+                resolveUserId(entry)
+              )
           )
         );
       } catch (error) {
@@ -83,7 +92,12 @@ const CreateGroupModal = ({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [currentUserId, deferredQuery, open]);
+  }, [
+    currentUserId,
+    deferredQuery,
+    excludedUserIds,
+    open,
+  ]);
 
   const toggleUser = (entry) => {
     const id = resolveUserId(entry);
@@ -107,8 +121,18 @@ const CreateGroupModal = ({
     <Modal
       open={open}
       onClose={onClose}
-      title="Create group"
-      description="Build the frontend member-selection flow now. A real create-group API can plug into this modal later without reworking the UI."
+      title={
+        title ??
+        (mode === "create"
+          ? "Create group"
+          : "Add members")
+      }
+      description={
+        description ??
+        (mode === "create"
+          ? "Create a live group conversation and notify selected members instantly."
+          : "Search users and add them to the active group.")
+      }
       size="lg"
       footer={
         <>
@@ -117,35 +141,51 @@ const CreateGroupModal = ({
           </Button>
           <Button
             onClick={() =>
-              onSubmit?.({
-                name: groupName.trim(),
-                members: selectedUsers,
-              })
+            onSubmit?.({
+              name: groupName.trim(),
+              members: selectedUsers,
+            })
             }
-            disabled={!groupName.trim() || !selectedUsers.length}
+            disabled={
+              (!hideGroupName && !groupName.trim()) ||
+              !selectedUsers.length
+            }
           >
-            Continue
+            {confirmLabel ??
+              (mode === "create"
+                ? "Create group"
+                : "Add members")}
           </Button>
         </>
       }
     >
       <div className="space-y-5">
-        <Input
-          label="Group name"
-          value={groupName}
-          onChange={(event) =>
-            setGroupName(event.target.value)
-          }
-          placeholder="Design squad"
-        />
+        {!hideGroupName ? (
+          <Input
+            label="Group name"
+            value={groupName}
+            onChange={(event) =>
+              setGroupName(event.target.value)
+            }
+            placeholder="Design squad"
+          />
+        ) : null}
 
         <SearchInput
-          label="Members"
+          label={
+            mode === "create"
+              ? "Members"
+              : "Add people"
+          }
           value={query}
           onChange={(event) =>
             setQuery(event.target.value)
           }
-          placeholder="Search users to add"
+          placeholder={
+            mode === "create"
+              ? "Search users to add"
+              : "Search users to invite"
+          }
         />
 
         {selectedUsers.length ? (
@@ -223,12 +263,14 @@ const CreateGroupModal = ({
               title={
                 query.trim().length >= 2
                   ? "No users matched that search"
-                  : "Search users to build your group"
+                  : mode === "create"
+                  ? "Search users to build your group"
+                  : "Search users to expand the group"
               }
               description={
                 query.trim().length >= 2
                   ? "Try another username to keep adding members."
-                  : "This modal is wired to the live user search endpoint so the member picker stays aligned with backend data."
+                  : "This member picker stays aligned with the live backend user directory."
               }
             />
           </div>

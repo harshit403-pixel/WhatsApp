@@ -1,8 +1,16 @@
-import { BellRing, BrushCleaning, Keyboard, MoonStar } from "lucide-react";
+import {
+  BellRing,
+  BrushCleaning,
+  Keyboard,
+  MoonStar,
+} from "lucide-react";
 
 import { Button } from "./ui/Button";
 import Modal from "./ui/Modal";
 
+/**
+ * Reusable toggle row used for user preferences.
+ */
 const ToggleRow = ({
   icon: Icon,
   title,
@@ -16,10 +24,12 @@ const ToggleRow = ({
         <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/6 text-zinc-300">
           <Icon className="h-4 w-4" />
         </span>
+
         <div className="min-w-0">
           <p className="text-sm font-semibold text-white">
             {title}
           </p>
+
           <p className="text-sm leading-6 text-zinc-500">
             {description}
           </p>
@@ -32,7 +42,9 @@ const ToggleRow = ({
         aria-checked={checked}
         onClick={() => onChange?.(!checked)}
         className={`relative h-7 w-12 shrink-0 rounded-full transition ${
-          checked ? "bg-emerald-400/90" : "bg-white/10"
+          checked
+            ? "bg-emerald-400/90"
+            : "bg-white/10"
         }`}
       >
         <span
@@ -45,6 +57,10 @@ const ToggleRow = ({
   );
 };
 
+/**
+ * Application settings modal.
+ * Preferences are stored locally and affect only the UI.
+ */
 const SettingsModal = ({
   open,
   onClose,
@@ -58,33 +74,27 @@ const SettingsModal = ({
       open={open}
       onClose={onClose}
       title="Settings"
-      description="Dark mode stays locked in. These preferences only tune the frontend experience."
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-          <Button variant="secondary" onClick={onClearRecentChats}>
-            Clear recent chats
-          </Button>
-        </>
-      }
+      description="Customize your chat experience."
+      
     >
       <div className="space-y-6">
+        {/* Signed in account */}
         <div className="rounded-[1.7rem] border border-white/8 bg-white/4 p-5">
           <p className="text-sm font-semibold text-white">
             Signed in as {user?.username}
           </p>
+
           <p className="mt-1 text-sm text-zinc-500">
             {user?.email}
           </p>
         </div>
 
+        {/* User preferences */}
         <div className="space-y-3">
           <ToggleRow
             icon={Keyboard}
             title="Press Enter to send"
-            description="Use Enter to submit the composer and Shift + Enter for a new line."
+            description="Press Shift + Enter for a new line."
             checked={preferences.enterToSend}
             onChange={(checked) =>
               onPreferenceChange?.(
@@ -93,10 +103,11 @@ const SettingsModal = ({
               )
             }
           />
+
           <ToggleRow
             icon={BrushCleaning}
             title="Compact chat list"
-            description="Reduce the vertical space used by recent contact cards."
+            description="Show more conversations on screen."
             checked={preferences.compactList}
             onChange={(checked) =>
               onPreferenceChange?.(
@@ -105,11 +116,14 @@ const SettingsModal = ({
               )
             }
           />
+
           <ToggleRow
             icon={BellRing}
             title="Show email previews"
-            description="Keep directory email previews visible in the conversation list."
-            checked={preferences.showEmailPreview}
+            description="Display email addresses in the chat list."
+            checked={
+              preferences.showEmailPreview
+            }
             onChange={(checked) =>
               onPreferenceChange?.(
                 "showEmailPreview",
@@ -117,11 +131,14 @@ const SettingsModal = ({
               )
             }
           />
+
           <ToggleRow
             icon={MoonStar}
             title="Reduce motion"
-            description="Dial down the page and drawer animations for a calmer experience."
-            checked={preferences.reducedMotion}
+            description="Use fewer animations."
+            checked={
+              preferences.reducedMotion
+            }
             onChange={(checked) =>
               onPreferenceChange?.(
                 "reducedMotion",

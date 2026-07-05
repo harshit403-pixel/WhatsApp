@@ -1,23 +1,7 @@
 import Avatar from "./ui/Avatar";
 import Badge from "./ui/Badge";
 import { cn } from "../lib/cn";
-
-const formatTime = (value) => {
-  if (!value) {
-    return "";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-};
+import { formatMessageTime } from "../../chats/lib/chat-helpers";
 
 const ChatCard = ({
   chat,
@@ -38,7 +22,11 @@ const ChatCard = ({
         compact && "py-3"
       )}
     >
-      <Avatar name={chat.username} showStatus statusTone="neutral" />
+      <Avatar
+        name={chat.username}
+        showStatus={!chat.isGroup}
+        statusTone={chat.online ? "active" : "muted"}
+      />
 
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-start justify-between gap-3">
@@ -54,18 +42,25 @@ const ChatCard = ({
           </div>
 
           <span className="shrink-0 text-[11px] text-zinc-500">
-            {formatTime(chat.lastOpenedAt)}
+            {formatMessageTime(chat.lastOpenedAt)}
           </span>
         </div>
 
         <div className="flex items-center justify-between gap-3">
-          <p className="truncate text-xs text-zinc-400">
+          <p
+            className={cn(
+              "truncate text-xs",
+              chat.isTyping
+                ? "text-emerald-300"
+                : "text-zinc-400"
+            )}
+          >
             {chat.preview || "No messages synced yet"}
           </p>
 
-          {chat.badge ? (
+          {chat.unreadCount ? (
             <Badge tone="success" className="px-2 py-0.5 text-[10px]">
-              {chat.badge}
+              {chat.unreadCount}
             </Badge>
           ) : null}
         </div>

@@ -3,14 +3,20 @@ import { MessageSquareMore } from "lucide-react";
 
 import Spinner from "./ui/Spinner";
 
+/**
+ * Full-screen loader shown while the app restores
+ * authentication and initial application data.
+ */
 const AppShellLoader = ({
-  title = "Preparing your workspace",
-  description = "Checking your secure session and loading the desktop shell.",
+  title = "Loading your chats",
+  description = "Please wait while we restore your session.",
 }) => {
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden px-6">
+      {/* Background glow */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,197,94,0.18),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.16),transparent_26%)]" />
 
+      {/* Loader card */}
       <motion.div
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
@@ -25,14 +31,16 @@ const AppShellLoader = ({
           <h1 className="text-2xl font-semibold text-white">
             {title}
           </h1>
+
           <p className="text-sm leading-6 text-zinc-400">
             {description}
           </p>
         </div>
 
+        {/* Authentication/session restore indicator */}
         <div className="flex items-center gap-3 rounded-full border border-white/8 bg-white/5 px-4 py-2.5 text-sm text-zinc-300">
           <Spinner size="sm" />
-          <span>Syncing authentication state</span>
+          <span>Restoring session...</span>
         </div>
       </motion.div>
     </main>
