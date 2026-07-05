@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-     "dev": "nodemon -L server.js",
+    "dev": "nodemon -L server.js",
     "start": "node server.js"
   },
   "repository": {
@@ -22,16 +22,18 @@
   "homepage": "https://github.com/harshit403-pixel/WhatsApp#readme",
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "express-validator": "^7.3.2",
-    "zod": "^4.4.3"
-  },
-  "devDependencies": {
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-validator": "^7.3.2",
+    "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.7.3",
-    "morgan": "^1.11.0",
+    "morgan": "^1.11.0", 
+    "socket.io": "^4.8.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
     "nodemon": "^3.1.14"
   }
 }
