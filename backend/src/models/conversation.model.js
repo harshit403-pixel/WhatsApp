@@ -12,7 +12,7 @@ const conversationSchema = new mongoose.Schema({
         
     }
 },{
-    timestamps:TextTrackCueList
+    timestamps:true
 })
 
 const conversationModel = mongoose.model("conversations", conversationSchema)

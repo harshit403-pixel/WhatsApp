@@ -31,3 +31,13 @@ export const getUserById = async (userId) => {
 
     return user
 }
+
+
+// search users by username
+ 
+export const searchUsersByUsername = async (username) => {
+    const users = await userModel.find({
+        username: { $regex: username, $options: 'i' }
+    }).select('username email'); // just include name and email in the result
+    return users;
+}
