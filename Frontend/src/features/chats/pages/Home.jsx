@@ -1,11 +1,12 @@
 import {
-  startTransition,
   useDeferredValue,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  AlertCircle,
   MessageSquareMore,
   PhoneCall,
   Search,
@@ -14,13 +15,21 @@ import {
   UserRound,
   UsersRound,
 } from "lucide-react";
-import { useSelector } from "react-redux";
 import { useNavigate } from "react-router";
 
 import useAuth from "../../auth/hooks/useAuth";
+import useChat from "../hooks/useChat";
+import {
+  buildConversationPreview,
+  buildTypingLabel,
+  formatLastSeen,
+  formatMessageTime,
+  getConversationPeer,
+} from "../lib/chat-helpers";
 import ChatHeader from "../../shared/components/ChatHeader";
 import ChatList from "../../shared/components/ChatList";
 import CreateGroupModal from "../../shared/components/CreateGroupModal";
+import GroupInfoDrawer from "../../shared/components/GroupInfoDrawer";
 import MessageBubble from "../../shared/components/MessageBubble";
 import MessageInput from "../../shared/components/MessageInput";
 import ProfileDrawer from "../../shared/components/ProfileDrawer";
@@ -29,10 +38,9 @@ import SettingsModal from "../../shared/components/SettingsModal";
 import Sidebar from "../../shared/components/Sidebar";
 import { Button } from "../../shared/components/ui/Button";
 import EmptyState from "../../shared/components/ui/EmptyState";
+import Skeleton from "../../shared/components/ui/Skeleton";
 import { appToast } from "../../shared/lib/toast";
-import { logoutUser } from "../../auth/services/auth.api";
 
-const RECENT_CHATS_KEY = "whatsapp:recent-chats";
 const UI_PREFERENCES_KEY = "whatsapp:ui-preferences";
 
 const defaultPreferences = {
@@ -40,23 +48,6 @@ const defaultPreferences = {
   enterToSend: true,
   showEmailPreview: true,
   reducedMotion: false,
-};
-
-const readStoredChats = () => {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  try {
-    const value = window.localStorage.getItem(
-      RECENT_CHATS_KEY
-    );
-    const parsed = JSON.parse(value ?? "[]");
-
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
 };
 
 const readStoredPreferences = () => {
@@ -81,39 +72,51 @@ const readStoredPreferences = () => {
   }
 };
 
-const normalizeUser = (entry) => ({
-  id: entry?.id ?? entry?._id ?? entry?.userId ?? "",
-  username: entry?.username ?? "Unknown user",
-  email: entry?.email ?? "No email available",
-  preview: "Conversation shell ready",
-  lastOpenedAt: new Date().toISOString(),
-  badge: 0,
-});
+const resolveEntryId = (entry) =>
+  entry?.id ?? entry?._id ?? entry?.userId ?? "";
 
 const Home = () => {
   const navigate = useNavigate();
   const { logout } = useAuth();
-  const currentUser = useSelector(
-    (state) => state.auth.user
-  );
+  const {
+    activeConversationId,
+    conversations,
+    currentUser,
+    loadingConversations,
+    loadingMessagesByConversation,
+    messagesByConversation,
+    socketStatus,
+    typingByConversation,
+    setActiveConversation,
+    loadConversations,
+    loadConversationMessages,
+    openPrivateConversation,
+    createGroup,
+    renameGroup,
+    addMembersToGroup,
+    removeMemberFromGroup,
+    leaveGroup,
+    markConversationRead,
+    sendMessage,
+    emitTypingStart,
+    emitTypingStop,
+  } = useChat();
 
   const [chatFilter, setChatFilter] = useState("");
   const deferredChatFilter =
     useDeferredValue(chatFilter);
   const [composerValue, setComposerValue] =
     useState("");
-  const [recentChats, setRecentChats] = useState(
-    readStoredChats
-  );
-  const [selectedChatId, setSelectedChatId] =
-    useState(() => readStoredChats()[0]?.id ?? null);
   const [preferences, setPreferences] = useState(
     readStoredPreferences
   );
   const [isSearchOpen, setIsSearchOpen] =
     useState(false);
-  const [isCreateGroupOpen, setIsCreateGroupOpen] =
-    useState(false);
+  const [groupModalState, setGroupModalState] =
+    useState({
+      open: false,
+      mode: "create",
+    });
   const [isSettingsOpen, setIsSettingsOpen] =
     useState(false);
   const [isListDrawerOpen, setIsListDrawerOpen] =
@@ -123,13 +126,14 @@ const Home = () => {
     mode: "account",
     user: null,
   });
-
-  useEffect(() => {
-    window.localStorage.setItem(
-      RECENT_CHATS_KEY,
-      JSON.stringify(recentChats)
-    );
-  }, [recentChats]);
+  const [isGroupDrawerOpen, setIsGroupDrawerOpen] =
+    useState(false);
+  const typingActiveRef = useRef(false);
+  const typingTimeoutRef = useRef(null);
+  const readSyncRef = useRef({
+    conversationId: null,
+    pending: false,
+  });
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -138,32 +142,338 @@ const Home = () => {
     );
   }, [preferences]);
 
-  const activeChatId = recentChats.some(
-    (chat) => chat.id === selectedChatId
-  )
-    ? selectedChatId
-    : recentChats[0]?.id ?? null;
-
-  const selectedChat =
-    recentChats.find(
-      (chat) => chat.id === activeChatId
-    ) ?? null;
-
-  const filteredChats = recentChats.filter((chat) => {
-    const query = deferredChatFilter
-      .trim()
-      .toLowerCase();
-
-    if (!query) {
-      return true;
+  useEffect(() => {
+    if (!currentUser) {
+      return;
     }
 
-    return [chat.username, chat.email, chat.preview]
-      .filter(Boolean)
-      .some((value) =>
-        value.toLowerCase().includes(query)
+    if (
+      socketStatus === "connected" ||
+      !conversations.length
+    ) {
+      loadConversations();
+    }
+
+    // The hook helpers are intentionally not memoized so this page stays easy
+    // to read. We only resync when user identity or socket state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, socketStatus]);
+
+  useEffect(() => {
+    if (
+      !activeConversationId &&
+      conversations.length
+    ) {
+      setActiveConversation(conversations[0].id);
+    }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConversationId, conversations]);
+
+  useEffect(() => {
+    if (!activeConversationId) {
+      return undefined;
+    }
+
+    const syncConversation = async () => {
+      await loadConversationMessages(
+        activeConversationId
       );
-  });
+    };
+
+    syncConversation();
+
+    return () => {
+      readSyncRef.current = {
+        conversationId: null,
+        pending: false,
+      };
+      emitTypingStop(activeConversationId);
+      typingActiveRef.current = false;
+      window.clearTimeout(
+        typingTimeoutRef.current
+      );
+    };
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    if (!activeConversationId) {
+      return;
+    }
+
+    if (!composerValue.trim()) {
+      if (typingActiveRef.current) {
+        emitTypingStop(activeConversationId);
+        typingActiveRef.current = false;
+      }
+
+      window.clearTimeout(
+        typingTimeoutRef.current
+      );
+      return;
+    }
+
+    if (!typingActiveRef.current) {
+      emitTypingStart(activeConversationId);
+      typingActiveRef.current = true;
+    }
+
+    window.clearTimeout(
+      typingTimeoutRef.current
+    );
+
+    typingTimeoutRef.current =
+      window.setTimeout(() => {
+        emitTypingStop(activeConversationId);
+        typingActiveRef.current = false;
+      }, 1200);
+
+    return () => {
+      window.clearTimeout(
+        typingTimeoutRef.current
+      );
+    };
+  }, [
+    activeConversationId,
+    composerValue,
+    emitTypingStart,
+    emitTypingStop,
+  ]);
+
+  const selectedConversation =
+    conversations.find(
+      (conversation) =>
+        conversation.id ===
+        activeConversationId
+    ) ?? null;
+
+  const activeMessages =
+    messagesByConversation[
+      selectedConversation?.id ?? ""
+    ] ?? [];
+
+  const hasUnreadIncomingMessages =
+    Boolean(selectedConversation) &&
+    activeMessages.some((message) => {
+      if (
+        message.sender?.id === currentUser?.id
+      ) {
+        return false;
+      }
+
+      return !message.readBy?.some(
+        (entry) =>
+          entry.userId === currentUser?.id
+      );
+    });
+
+  useEffect(() => {
+    if (
+      !activeConversationId ||
+      !currentUser?.id ||
+      !hasUnreadIncomingMessages
+    ) {
+      return;
+    }
+
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState !== "visible"
+    ) {
+      return;
+    }
+
+    if (
+      readSyncRef.current.pending &&
+      readSyncRef.current.conversationId ===
+        activeConversationId
+    ) {
+      return;
+    }
+
+    readSyncRef.current = {
+      conversationId: activeConversationId,
+      pending: true,
+    };
+
+    void (async () => {
+      try {
+        await markConversationRead(
+          activeConversationId
+        );
+      } finally {
+        if (
+          readSyncRef.current.conversationId ===
+          activeConversationId
+        ) {
+          readSyncRef.current = {
+            conversationId:
+              activeConversationId,
+            pending: false,
+          };
+        }
+      }
+    })();
+  }, [
+    activeConversationId,
+    currentUser?.id,
+    hasUnreadIncomingMessages,
+    markConversationRead,
+  ]);
+
+  useEffect(() => {
+    if (!activeConversationId) {
+      return undefined;
+    }
+
+    const handleVisibilityChange = () => {
+      if (
+        document.visibilityState !==
+          "visible" ||
+        !hasUnreadIncomingMessages
+      ) {
+        return;
+      }
+
+      if (
+        readSyncRef.current.pending &&
+        readSyncRef.current.conversationId ===
+          activeConversationId
+      ) {
+        return;
+      }
+
+      readSyncRef.current = {
+        conversationId: activeConversationId,
+        pending: true,
+      };
+
+      void (async () => {
+        try {
+          await markConversationRead(
+            activeConversationId
+          );
+        } finally {
+          if (
+            readSyncRef.current
+              .conversationId ===
+            activeConversationId
+          ) {
+            readSyncRef.current = {
+              conversationId:
+                activeConversationId,
+              pending: false,
+            };
+          }
+        }
+      })();
+    };
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange
+    );
+
+    return () => {
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+    };
+  }, [
+    activeConversationId,
+    hasUnreadIncomingMessages,
+    markConversationRead,
+  ]);
+
+  const typingLabelByConversation = {};
+
+  for (const conversation of conversations) {
+    const typingUserIds = (
+      typingByConversation[conversation.id] ?? []
+    ).filter(
+      (userId) =>
+        userId !== currentUser?.id
+    );
+
+    typingLabelByConversation[
+      conversation.id
+    ] = buildTypingLabel(
+      conversation,
+      typingUserIds
+    );
+  }
+
+  const chatCards = conversations
+    .map((conversation) => {
+      const peer = getConversationPeer(
+        conversation,
+        currentUser?.id
+      );
+      const typingLabel =
+        typingLabelByConversation[
+          conversation.id
+        ] ?? "";
+
+      return {
+        ...conversation,
+        username: conversation.name,
+        email: conversation.isGroup
+          ? `${conversation.participants.length} members`
+          : peer?.email ?? "",
+        preview: buildConversationPreview({
+          conversation,
+          currentUserId: currentUser?.id,
+          typingLabel,
+        }),
+        unreadCount:
+          conversation.unreadCount,
+        lastOpenedAt:
+          conversation.lastMessageAt,
+        online: conversation.online,
+        isTyping: Boolean(typingLabel),
+      };
+    })
+    .filter((chat) => {
+      const query = deferredChatFilter
+        .trim()
+        .toLowerCase();
+
+      if (!query) {
+        return true;
+      }
+
+      return [
+        chat.username,
+        chat.email,
+        chat.preview,
+      ]
+        .filter(Boolean)
+        .some((value) =>
+          value
+            .toLowerCase()
+            .includes(query)
+        );
+    });
+
+  const selectedChatCard =
+    chatCards.find(
+      (chat) =>
+        chat.id ===
+        selectedConversation?.id
+    ) ?? null;
+  const activeTypingLabel =
+    selectedConversation
+      ? typingLabelByConversation[
+          selectedConversation.id
+        ]
+      : "";
+  const isMessagesLoading =
+    loadingMessagesByConversation[
+      selectedConversation?.id ?? ""
+    ];
 
   const transition = preferences.reducedMotion
     ? { duration: 0 }
@@ -178,63 +488,50 @@ const Home = () => {
   };
 
   const openContactDrawer = () => {
-    if (!selectedChat) {
+    if (!selectedConversation) {
       return;
     }
+
+    const peer = getConversationPeer(
+      selectedConversation,
+      currentUser?.id
+    );
 
     setProfileState({
       open: true,
       mode: "contact",
-      user: selectedChat,
+      user: peer,
     });
   };
 
-  const handleSelectUser = (entry) => {
-    const normalized = normalizeUser(entry);
+  const handleSelectUser = async (entry) => {
+    const conversation =
+      await openPrivateConversation(
+        resolveEntryId(entry)
+      );
 
-    startTransition(() => {
-      setRecentChats((current) => {
-        const existingChat = current.find(
-          (chat) => chat.id === normalized.id
-        );
+    if (!conversation) {
+      return;
+    }
 
-        const nextChat = {
-          ...(existingChat ?? {}),
-          ...normalized,
-          preview:
-            existingChat?.preview ??
-            "Start a conversation",
-          lastOpenedAt: new Date().toISOString(),
-        };
-
-        return [
-          nextChat,
-          ...current.filter(
-            (chat) => chat.id !== normalized.id
-          ),
-        ].slice(0, 18);
-      });
-      setSelectedChatId(normalized.id);
-      setComposerValue("");
-      setIsListDrawerOpen(false);
-    });
-
+    setComposerValue("");
+    setIsListDrawerOpen(false);
     setIsSearchOpen(false);
     appToast.success(
-      `Opened ${normalized.username}`,
-      "The conversation shell is ready for live history and socket transport when those frontend contracts are exposed."
+      `Opened ${conversation.name}`,
+      "Chat opened."
     );
   };
 
   const handleSelectChat = (chat) => {
-    setSelectedChatId(chat.id);
+    setActiveConversation(chat.id);
     setComposerValue("");
     setIsListDrawerOpen(false);
   };
 
   const handleLogout = async () => {
     try {
-      await logoutUser();
+      await logout();
       appToast.success(
         "Signed out",
         "Your session ended successfully."
@@ -274,7 +571,10 @@ const Home = () => {
     }
   };
 
-  const handlePreferenceChange = (key, value) => {
+  const handlePreferenceChange = (
+    key,
+    value
+  ) => {
     setPreferences((current) => ({
       ...current,
       [key]: value,
@@ -282,23 +582,49 @@ const Home = () => {
   };
 
   const handleClearRecentChats = () => {
-    setRecentChats([]);
-    setComposerValue("");
     appToast.info(
-      "Recent chats cleared",
-      "You can repopulate this list from live user search at any time."
+     "No local chats to clear."
     );
   };
 
-  const handleComposerSubmit = () => {
-    if (!composerValue.trim()) {
+  const stopTypingNow = () => {
+    if (!activeConversationId) {
       return;
     }
 
-    appToast.warning(
-      "Message sending is not wired yet",
-      "The current frontend contract exposes authentication and user search, but not conversation history or send endpoints."
+    emitTypingStop(activeConversationId);
+    typingActiveRef.current = false;
+    window.clearTimeout(
+      typingTimeoutRef.current
     );
+  };
+
+  const handleComposerSubmit = async () => {
+    if (
+      !composerValue.trim() ||
+      !selectedConversation
+    ) {
+      return;
+    }
+
+    const messageContent =
+      composerValue.trim();
+
+    setComposerValue("");
+    stopTypingNow();
+
+    await sendMessage({
+      conversationId:
+        selectedConversation.id,
+      receiverId:
+        selectedConversation.isGroup
+          ? null
+          : getConversationPeer(
+              selectedConversation,
+              currentUser?.id
+            )?.id,
+      content: messageContent,
+    });
   };
 
   const handleCallAttempt = () => {
@@ -322,15 +648,150 @@ const Home = () => {
     );
   };
 
-  const handleGroupSubmit = ({
+  const handleCreateGroup = async ({
     name,
     members,
   }) => {
-    appToast.warning(
-      "Group creation needs a backend route",
-      `The UI captured "${name}" with ${members.length} member selections, but no create-group contract is currently exposed.`
-    );
-    setIsCreateGroupOpen(false);
+    try {
+      const conversation =
+        await createGroup({
+          groupName: name,
+          memberIds: members.map(
+            (member) =>
+              resolveEntryId(member)
+          ),
+        });
+
+      setGroupModalState({
+        open: false,
+        mode: "create",
+      });
+
+      appToast.success(
+        `Created ${conversation.name}`,
+       "Group created successfully."
+      );
+    } catch (error) {
+      appToast.error(
+        "Unable to create group",
+        error.response?.data?.message ??
+          "Please try again."
+      );
+    }
+  };
+
+  const handleAddMembers = async ({
+    members,
+  }) => {
+    if (!selectedConversation) {
+      return;
+    }
+
+    try {
+      await addMembersToGroup({
+        conversationId:
+          selectedConversation.id,
+        memberIds: members.map(
+          (member) =>
+            resolveEntryId(member)
+        ),
+      });
+
+      setGroupModalState({
+        open: false,
+        mode: "addMembers",
+      });
+
+      appToast.success(
+        "Members added successfully."
+      );
+    } catch (error) {
+      appToast.error(
+        "Unable to add members",
+        error.response?.data?.message ??
+          "Please try again."
+      );
+    }
+  };
+
+  const handleRenameGroup = async (
+    nextGroupName
+  ) => {
+    if (!selectedConversation) {
+      return;
+    }
+
+    try {
+      await renameGroup({
+        conversationId:
+          selectedConversation.id,
+        groupName: nextGroupName,
+      });
+
+      appToast.success(
+        "Group renamed successfully."
+      );
+    } catch (error) {
+      appToast.error(
+        "Unable to rename group",
+        error.response?.data?.message ??
+          "Please try again."
+      );
+    }
+  };
+
+  const handleRemoveMember = async (
+    memberId
+  ) => {
+    if (!selectedConversation) {
+      return;
+    }
+
+    try {
+      await removeMemberFromGroup({
+        conversationId:
+          selectedConversation.id,
+        memberId,
+      });
+
+      appToast.success(
+        "Member removed",
+        "The group roster updated in real time."
+      );
+    } catch (error) {
+      appToast.error(
+        "Unable to remove member",
+        error.response?.data?.message ??
+          "Please try again."
+      );
+    }
+  };
+
+  const handleLeaveGroup = async () => {
+    if (!selectedConversation) {
+      return;
+    }
+
+    try {
+      const groupName =
+        selectedConversation.name;
+
+      await leaveGroup(
+        selectedConversation.id
+      );
+
+      setIsGroupDrawerOpen(false);
+      appToast.success(
+        "Left group",
+        `${groupName} was removed from your conversation list.`
+      );
+    } catch (error) {
+      appToast.error(
+        "Unable to leave group",
+        error.response?.data?.message ??
+          "Please try again."
+      );
+    }
   };
 
   return (
@@ -338,28 +799,37 @@ const Home = () => {
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={transition}
-      className="relative min-h-screen overflow-hidden"
+      className="relative h-[100dvh] overflow-hidden"
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,197,94,0.16),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.14),transparent_25%)]" />
 
-      <div className="relative flex min-h-screen">
+      <div className="relative flex h-full min-h-0 overflow-hidden">
         <Sidebar
           user={currentUser}
           onOpenSearch={() => setIsSearchOpen(true)}
           onOpenProfile={openAccountDrawer}
-          onOpenGroups={() => setIsCreateGroupOpen(true)}
+          onOpenGroups={() =>
+            setGroupModalState({
+              open: true,
+              mode: "create",
+            })
+          }
           onOpenSettings={() => setIsSettingsOpen(true)}
           onLogout={handleLogout}
         />
 
-        <div className="flex min-w-0 flex-1 flex-col p-3 sm:p-4 md:p-5">
-          <div className="glass-panel mb-4 flex items-center justify-between rounded-[1.7rem] px-4 py-3 md:hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-3 sm:p-4 md:p-5">
+          <div className="glass-panel mb-4 shrink-0 flex items-center justify-between rounded-[1.7rem] px-4 py-3 md:hidden">
             <div>
               <p className="text-sm font-semibold text-white">
                 {currentUser?.username || "Workspace"}
               </p>
               <p className="text-xs text-zinc-500">
-                Production-safe desktop shell
+                {socketStatus === "connected"
+                  ? "Real-time connection active"
+                  : socketStatus === "connecting"
+                  ? "Connecting to chat server..."
+                  : "Reconnecting to chat server..."}
               </p>
             </div>
 
@@ -394,17 +864,22 @@ const Home = () => {
             </div>
           </div>
 
-          <div className="flex min-h-0 flex-1 gap-4">
-            <div className="hidden w-[340px] shrink-0 lg:block">
+          <div className="flex min-h-0 flex-1 gap-4 overflow-hidden">
+            <div className="hidden h-full min-h-0 w-[340px] shrink-0 lg:block">
               <ChatList
-                chats={filteredChats}
-                activeChatId={activeChatId}
+                chats={chatCards}
+                activeChatId={
+                  activeConversationId
+                }
                 filterValue={chatFilter}
                 onFilterChange={setChatFilter}
                 onSelectChat={handleSelectChat}
                 onOpenSearch={() => setIsSearchOpen(true)}
                 onOpenGroups={() =>
-                  setIsCreateGroupOpen(true)
+                  setGroupModalState({
+                    open: true,
+                    mode: "create",
+                  })
                 }
                 compact={preferences.compactList}
                 showEmailPreview={
@@ -413,73 +888,172 @@ const Home = () => {
               />
             </div>
 
-            <section className="glass-panel-strong flex min-h-[calc(100vh-1.5rem)] flex-1 flex-col overflow-hidden rounded-[2rem]">
-              {selectedChat ? (
+            <section className="glass-panel-strong flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2rem]">
+              {selectedConversation ? (
                 <>
                   <ChatHeader
-                    chat={selectedChat}
+                    chat={{
+                      ...selectedChatCard,
+                      username:
+                        selectedConversation.name,
+                      email:
+                        selectedConversation.isGroup
+                          ? activeTypingLabel ||
+                            `${selectedConversation.participants.length} members`
+                          : selectedConversation.online
+                          ? "Online now"
+                          : formatLastSeen(
+                              selectedConversation.lastSeen
+                            ),
+                    }}
                     onOpenList={() =>
                       setIsListDrawerOpen(true)
                     }
-                    onOpenProfile={openContactDrawer}
+                    onOpenProfile={() => {
+                      if (
+                        selectedConversation.isGroup
+                      ) {
+                        setIsGroupDrawerOpen(true);
+                        return;
+                      }
+
+                      openContactDrawer();
+                    }}
                     onStartCall={handleCallAttempt}
-                    menuItems={[
-                      {
-                        label: "View profile",
-                        icon: UserRound,
-                        onSelect: openContactDrawer,
-                      },
-                      {
-                        label: "Start call",
-                        icon: PhoneCall,
-                        onSelect: handleCallAttempt,
-                      },
-                      {
-                        label: "Create group with contact",
-                        icon: UsersRound,
-                        onSelect: () =>
-                          setIsCreateGroupOpen(true),
-                      },
-                    ]}
+                    showCallAction={
+                      !selectedConversation.isGroup
+                    }
+                    menuItems={
+                      selectedConversation.isGroup
+                        ? [
+                            {
+                              label:
+                                "View group info",
+                              icon: UsersRound,
+                              onSelect: () =>
+                                setIsGroupDrawerOpen(
+                                  true
+                                ),
+                            },
+                            {
+                              label:
+                                "Add members",
+                              icon: UsersRound,
+                              onSelect: () =>
+                                setGroupModalState({
+                                  open: true,
+                                  mode: "addMembers",
+                                }),
+                            },
+                          ]
+                        : [
+                            {
+                              label:
+                                "View profile",
+                              icon: UserRound,
+                              onSelect:
+                                openContactDrawer,
+                            },
+                            {
+                              label:
+                                "Start call",
+                              icon: PhoneCall,
+                              onSelect:
+                                handleCallAttempt,
+                            },
+                            {
+                              label:
+                                "Create group with contact",
+                              icon: UsersRound,
+                              onSelect: () =>
+                                setGroupModalState({
+                                  open: true,
+                                  mode: "create",
+                                }),
+                            },
+                          ]
+                    }
                   />
 
                   <div className="app-scrollbar flex-1 overflow-y-auto px-4 py-6 sm:px-6">
                     <div className="mx-auto flex max-w-2xl flex-col gap-4">
-                      <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-white/8 bg-white/4 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-400">
-                        <Sparkles className="h-3.5 w-3.5 text-emerald-300" />
-                        Chat window ready
-                      </div>
+                     
 
-                      <MessageBubble
-                        variant="system"
-                        text={`You opened ${selectedChat.username} through the live user directory. This conversation layout is production-ready and waiting for message history plus transport contracts.`}
-                      />
-                      <MessageBubble
-                        variant="system"
-                        text="Typing indicators, delivery states, and attachments can slot into this shell without another UI rewrite."
-                      />
+                      {isMessagesLoading &&
+                      !activeMessages.length ? (
+                        <div className="space-y-3">
+                          {[1, 2, 3].map((item) => (
+                            <Skeleton
+                              key={item}
+                              className="h-16 w-full rounded-[1.65rem]"
+                            />
+                          ))}
+                        </div>
+                      ) : activeMessages.length ? (
+                        activeMessages.map(
+                          (message) => {
+                            const isOutgoing =
+                              message.sender?.id ===
+                              currentUser?.id;
 
-                      <div className="rounded-[1.75rem] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-5">
-                        <div className="flex items-start gap-3">
-                          <MessageSquareMore className="mt-0.5 h-5 w-5 text-emerald-300" />
-                          <div>
-                            <p className="text-sm font-semibold text-white">
-                              Why this stays honest
-                            </p>
-                            <p className="mt-2 text-sm leading-6 text-zinc-400">
-                              The backend currently exposes authentication and
-                              user search routes to the frontend. Since message
-                              history and send endpoints are not available yet,
-                              this screen keeps the UX polished without faking
-                              chat data.
-                            </p>
+                            return (
+                              <MessageBubble
+                                key={message.id}
+                                variant={
+                                  isOutgoing
+                                    ? "outgoing"
+                                    : "incoming"
+                                }
+                                senderName={
+                                  selectedConversation.isGroup &&
+                                  !isOutgoing
+                                    ? message.sender
+                                        ?.username
+                                    : null
+                                }
+                                text={
+                                  message.content ||
+                                  "Attachment message"
+                                }
+                                timestamp={formatMessageTime(
+                                  message.createdAt
+                                )}
+                                deliveryState={
+                                  isOutgoing
+                                    ? message.status
+                                    : undefined
+                                }
+                                clientState={
+                                  message.clientState
+                                }
+                              />
+                            );
+                          }
+                        )
+                      ) : (
+                        <div className="rounded-[1.75rem] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-5">
+                          <div className="flex items-start gap-3">
+                            <MessageSquareMore className="mt-0.5 h-5 w-5 text-emerald-300" />
+                            <div>
+                              <p className="text-sm font-semibold text-white">
+                                "No messages yet. Send the first message."
+                              </p>
+                    
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      )}
+
+                      {activeTypingLabel ? (
+                        <MessageBubble
+                          variant="system"
+                          text={activeTypingLabel}
+                        />
+                      ) : null}
                     </div>
                   </div>
 
-                  <div className="border-t border-white/8 px-4 py-4 sm:px-6">
+                  <div className="shrink-0 border-t border-white/8 px-4 py-4 sm:px-6">
                     <MessageInput
                       value={composerValue}
                       onChange={setComposerValue}
@@ -488,6 +1062,9 @@ const Home = () => {
                       onOpenAttachment={
                         handleAttachmentAttempt
                       }
+                      disabled={
+                        socketStatus !== "connected"
+                      }
                       enterToSend={
                         preferences.enterToSend
                       }
@@ -495,8 +1072,8 @@ const Home = () => {
                   </div>
                 </>
               ) : (
-                <div className="flex h-full flex-1 flex-col">
-                  <div className="flex items-center justify-between border-b border-white/8 px-4 py-4 sm:px-6">
+                <div className="flex h-full min-h-0 flex-1 flex-col">
+                  <div className="shrink-0 flex items-center justify-between border-b border-white/8 px-4 py-4 sm:px-6">
                     <div>
                       <p className="text-sm font-semibold text-white">
                         Workspace
@@ -520,7 +1097,12 @@ const Home = () => {
                       </Button>
                       <Button
                         variant="secondary"
-                        onClick={() => setIsSearchOpen(true)}
+                        onClick={() =>
+                          setIsSearchOpen(true)
+                        }
+                        disabled={
+                          loadingConversations
+                        }
                       >
                         <Search className="h-4 w-4" />
                         <span>Search users</span>
@@ -528,18 +1110,31 @@ const Home = () => {
                     </div>
                   </div>
 
-                  <div className="flex flex-1 items-center justify-center px-6 py-10">
-                    <EmptyState
-                      icon={MessageSquareMore}
-                      title="Choose someone to start chatting"
-                      description="Search the live user directory, open a conversation shell, and keep it pinned in your recent chats list."
-                      actionLabel="Search users"
-                      onAction={() => setIsSearchOpen(true)}
-                      secondaryLabel="Create group"
-                      onSecondaryAction={() =>
-                        setIsCreateGroupOpen(true)
-                      }
-                    />
+                  <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-10">
+                    {loadingConversations ? (
+                      <div className="w-full max-w-md space-y-3">
+                        <Skeleton className="h-6 w-40" />
+                        <Skeleton className="h-4 w-64" />
+                        <Skeleton className="h-40 w-full rounded-[1.8rem]" />
+                      </div>
+                    ) : (
+                      <EmptyState
+                        icon={MessageSquareMore}
+                        title="Choose someone to start chatting"
+                        description="Search users"
+                        actionLabel="Search users"
+                        onAction={() =>
+                          setIsSearchOpen(true)
+                        }
+                        secondaryLabel="Create group"
+                        onSecondaryAction={() =>
+                          setGroupModalState({
+                            open: true,
+                            mode: "create",
+                          })
+                        }
+                      />
+                    )}
                   </div>
                 </div>
               )}
@@ -556,7 +1151,9 @@ const Home = () => {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={transition}
-                onClick={() => setIsListDrawerOpen(false)}
+                onClick={() =>
+                  setIsListDrawerOpen(false)
+                }
                 aria-label="Close conversations drawer overlay"
                 className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm lg:hidden"
               />
@@ -569,8 +1166,10 @@ const Home = () => {
                 className="fixed inset-y-4 left-4 z-40 w-[min(90vw,340px)] lg:hidden"
               >
                 <ChatList
-                  chats={filteredChats}
-                  activeChatId={activeChatId}
+                  chats={chatCards}
+                  activeChatId={
+                    activeConversationId
+                  }
                   filterValue={chatFilter}
                   onFilterChange={setChatFilter}
                   onSelectChat={handleSelectChat}
@@ -578,7 +1177,10 @@ const Home = () => {
                     setIsSearchOpen(true)
                   }
                   onOpenGroups={() =>
-                    setIsCreateGroupOpen(true)
+                    setGroupModalState({
+                      open: true,
+                      mode: "create",
+                    })
                   }
                   compact={preferences.compactList}
                   showEmailPreview={
@@ -591,11 +1193,6 @@ const Home = () => {
         </AnimatePresence>
 
         <SearchUsersModal
-          key={
-            isSearchOpen
-              ? "search-modal-open"
-              : "search-modal-closed"
-          }
           open={isSearchOpen}
           onClose={() => setIsSearchOpen(false)}
           currentUserId={currentUser?.id}
@@ -604,16 +1201,51 @@ const Home = () => {
 
         <CreateGroupModal
           key={
-            isCreateGroupOpen
-              ? "group-modal-open"
-              : "group-modal-closed"
+            `${groupModalState.mode}-${groupModalState.open}`
           }
-          open={isCreateGroupOpen}
+          open={groupModalState.open}
           onClose={() =>
-            setIsCreateGroupOpen(false)
+            setGroupModalState((current) => ({
+              ...current,
+              open: false,
+            }))
           }
           currentUserId={currentUser?.id}
-          onSubmit={handleGroupSubmit}
+          mode={groupModalState.mode}
+          title={
+            groupModalState.mode ===
+            "create"
+              ? "Create group"
+              : "Add members"
+          }
+          description={
+            groupModalState.mode ===
+            "create"
+              ? "Create a live group conversation and notify selected members instantly."
+              : "Invite more people into the active group chat."
+          }
+          confirmLabel={
+            groupModalState.mode ===
+            "create"
+              ? "Create group"
+              : "Add members"
+          }
+          hideGroupName={
+            groupModalState.mode ===
+            "addMembers"
+          }
+          excludedUserIds={
+            selectedConversation?.participants?.map(
+              (participant) =>
+                participant.id
+            ) ?? []
+          }
+          onSubmit={
+            groupModalState.mode ===
+            "create"
+              ? handleCreateGroup
+              : handleAddMembers
+          }
         />
 
         <SettingsModal
@@ -629,6 +1261,36 @@ const Home = () => {
           open={profileState.open}
           user={profileState.user}
           mode={profileState.mode}
+          heading={
+            profileState.mode === "account"
+              ? "Your profile"
+              : "Contact details"
+          }
+          subheading={
+            profileState.mode === "account"
+              ? "Manage session and preferences"
+              : "Presence and chat details for this contact."
+          }
+          presenceLabel={
+            profileState.mode === "account"
+              ? "Authenticated now"
+              : selectedConversation?.online
+              ? "Online now"
+              : formatLastSeen(
+                  selectedConversation?.lastSeen
+                )
+          }
+          messageSummary={
+            selectedConversation?.lastMessage
+              ?.content
+              ? `Latest message: ${selectedConversation.lastMessage.content}`
+              : "No messages exchanged yet."
+          }
+          badgeLabel={
+            profileState.mode === "account"
+              ? "Authenticated"
+              : "Direct chat"
+          }
           onClose={() =>
             setProfileState((current) => ({
               ...current,
@@ -644,6 +1306,25 @@ const Home = () => {
             setIsSettingsOpen(true);
           }}
           onLogout={handleLogout}
+        />
+
+        <GroupInfoDrawer
+          key={`${selectedConversation?.id ?? "no-group"}-${selectedConversation?.groupName ?? ""}-${isGroupDrawerOpen}`}
+          open={isGroupDrawerOpen}
+          conversation={selectedConversation}
+          currentUserId={currentUser?.id}
+          onClose={() =>
+            setIsGroupDrawerOpen(false)
+          }
+          onRenameGroup={handleRenameGroup}
+          onOpenAddMembers={() =>
+            setGroupModalState({
+              open: true,
+              mode: "addMembers",
+            })
+          }
+          onRemoveMember={handleRemoveMember}
+          onLeaveGroup={handleLeaveGroup}
         />
       </div>
     </motion.main>
