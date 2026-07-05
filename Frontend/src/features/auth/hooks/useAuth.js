@@ -15,6 +15,13 @@ import {
   logoutUser,
   getCurrentUser,
 } from "../services/auth.api";
+import { clearChatState } from "../../chats/state/chat.slice";
+import { disconnectChatSocket } from "../../chats/services/socket.client";
+
+const CHAT_UI_KEYS = [
+  "whatsapp:recent-chats",
+  "whatsapp:ui-preferences",
+];
 
 const useAuth = () => {
   const dispatch = useDispatch();
@@ -114,11 +121,20 @@ const useAuth = () => {
     try {
       dispatch(setLoading(true));
 
+      // Disconnect first so the socket server can mark the user offline
+      // before we clear local state.
+      disconnectChatSocket();
+
       // Remove cookies/session on backend
       await logoutUser();
 
       // Clear Redux state
+      dispatch(clearChatState());
       dispatch(logoutAction());
+
+      for (const key of CHAT_UI_KEYS) {
+        window.localStorage.removeItem(key);
+      }
 
       // Auth check is complete
       dispatch(setAuthChecked(true));
@@ -146,8 +162,9 @@ const useAuth = () => {
     const data = await getCurrentUser();
 
     dispatch(setUser(data.data.user));
-  } catch (error) {
+  } catch {
     dispatch(logoutAction());
+    dispatch(clearChatState());
   } finally {
     dispatch(setAuthChecked(true));
     dispatch(setLoading(false));
