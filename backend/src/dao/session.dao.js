@@ -39,18 +39,31 @@ export const getSessionByUserId = async (userId) => {
  * @returns {Promise<Document|null>} Updated session document or null if not found
 */
 
-export const updateSessionbyUserId = async (userId, refreshToken)=>{
-  const session = await sessionModel.findOneAndUpdate(
-    {userId},
-    {refreshToken},
-    {new:true}
-  )
-  return session
-}
+export const updateSessionbyUserId =
+  async (
+    userId,
+    refreshToken
+  ) => {
+    const session =
+      await sessionModel.findOne({
+        userId,
+      });
 
+    if (!session) {
+      return null;
+    }
 
-export const deleteSessionByUserId = async (req,res) => {
-  const session = await sessionModel.findOneAndDelete({userId})
-  return session
-  
-}
+    session.refreshToken =
+      refreshToken;
+
+    await session.save();
+
+    return session;
+  };
+
+export const deleteSessionByUserId =
+  async (userId) => {
+    return await sessionModel.findOneAndDelete(
+      { userId }
+    );
+  };

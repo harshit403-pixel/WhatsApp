@@ -2,6 +2,7 @@ import * as userDao from "../dao/user.dao.js"
 import * as sessionDao from "../dao/session.dao.js"
 import * as authUtils from "../utils/auth.util.js"
 import env from '../config/env.js'
+import { getRedisClient } from "../config/cache.js"
 
 
 export const registerUser = async(req,res)=>{
@@ -145,7 +146,7 @@ export const refreshTokenController = async (req,res) => {
         })
       }
 
-      const isRefreshTokenValid = session.compareRefreshToken(refreshToken)
+      const isRefreshTokenValid = await session.compareRefreshToken(refreshToken)
 
       if(!isRefreshTokenValid){
         return res.status(400).json({
@@ -155,7 +156,10 @@ export const refreshTokenController = async (req,res) => {
       const newAccessToken = authUtils.generateAccessToken(decoded.userId)
       const newRefreshToken = authUtils.generateRefreshToken(decoded.userId)
 
-      await sessionDao.updateSessionbyUserId(decoded.userId,{ refreshToken: newRefreshToken})
+      await sessionDao.updateSessionbyUserId(
+  decoded.userId,
+  newRefreshToken
+);
 
       res.cookie('refreshToken', newRefreshToken,{
         httpOnly: true,
@@ -180,27 +184,52 @@ export const refreshTokenController = async (req,res) => {
 }
 
 
-export const getMe = async (req,res) => {
+export const getMe = async (req, res) => {
+  const userId = req.userId;
+  const redis = getRedisClient();
 
-    const userId = req.userId
+  // Redis key
+  const cacheKey = `user:${userId}`;
 
-    const user = await userDao.getUserById(userId)
+  // Try getting user from Redis first
+  const cachedUser = await redis.get(cacheKey);
 
-    if(!user){
-        return res.status(404).json({
-            message:"user not found"
-        })
-    }
-
+  if (cachedUser) {
     return res.status(200).json({
-       message: "user data retrieved successfully",
-        data:{
-            user:{
-                id: user._id,
-                username: user.username,
-                email: user.email
-            }
-        }
-    })
-    
-}
+      message: "user data retrieved successfully",
+      data: {
+        user: JSON.parse(cachedUser),
+      },
+    });
+  }
+
+  // If not found in cache, fetch from MongoDB
+  const user = await userDao.getUserById(userId);
+
+  if (!user) {
+    return res.status(404).json({
+      message: "user not found",
+    });
+  }
+
+  const userData = {
+    id: user._id,
+    username: user.username,
+    email: user.email,
+  };
+
+  // Store in Redis for 1 hour
+  await redis.set(
+    cacheKey,
+    JSON.stringify(userData),
+    "EX",
+    60 * 60
+  );
+
+  return res.status(200).json({
+    message: "user data retrieved successfully",
+    data: {
+      user: userData,
+    },
+  });
+};

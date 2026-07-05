@@ -6,8 +6,46 @@ services:
       - "3000:3000"
     volumes:
       - ./backend:/app
-      - whatsapp_node_modules:/app/node_modules
+      - whatsapp_backend_node_modules:/app/node_modules
     command: npm run dev
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    stdin_open: true
+    tty: true
+
+  frontend:
+    build: ./Frontend
+    container_name: frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./Frontend:/app
+      - whatsapp_frontend_node_modules:/app/node_modules
+    command: npm run dev -- --host
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - backend
+    stdin_open: true
+    tty: true
+
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: redis_cache
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass MySecurePassword123 --appendonly yes
+    volumes:
+      - whatsapp_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "MySecurePassword123", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3  
 
 volumes:
-  whatsapp_node_modules:
+  whatsapp_backend_node_modules:
+  whatsapp_frontend_node_modules:
+  whatsapp_redis_data:
